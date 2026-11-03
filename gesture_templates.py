@@ -73,7 +73,8 @@ def _build(gesture: str) -> np.ndarray:
         spread = _V_SPREAD.get(k, _SPREAD[k]) if gesture == "V_SIGN" else _SPREAD[k]
         pts[FINGERS[k + 1], :] = _finger(k, flex, spread)
     if thumb_mode == "abducted":
-        th = _thumb_straight((-0.65, -0.75, -0.10))
+        # real hands abduct the thumb ~60 deg; tip lands ~1.1 palm widths from the index PIP (dev-5)
+        th = _thumb_straight((-0.85, -0.50, -0.10))
     elif thumb_mode == "radial":
         th = _thumb_straight((-0.95, -0.25, -0.15))
     elif thumb_mode == "folded":

@@ -21,6 +21,11 @@ FINGER_STATE = {
 }
 
 
+def px(w):
+    """Orthographic projection of world landmarks to pixel coordinates."""
+    return np.c_[w[:, 0] * 800 + 640, w[:, 1] * 800 + 360, w[:, 2] * 800]
+
+
 def _rot(rng):
     axis = rng.normal(size=3)
     axis /= np.linalg.norm(axis)
@@ -40,41 +45,49 @@ def test_templates_classify():
                 pw = np.linalg.norm(p[5] - p[17])
                 p = p @ _rot(rng).T * rng.uniform(0.7, 1.3) + rng.uniform(-0.05, 0.05, 3)
                 p += rng.normal(0, 0.01 * np.linalg.norm(p[5] - p[17]), p.shape)
-                assert classify(p, G) == g, (g, mirror)
+                assert classify(p, px(p), G) == g, (g, mirror)
 
 
 def test_template_margins():
     for g in GESTURES:
-        a = analyze(TEMPLATES[g], G)
-        for d, ext in zip(a.pip_deg, FINGER_STATE[g]):
-            assert d >= 170 if ext else d <= 130, (g, a.pip_deg)
+        a = analyze(TEMPLATES[g], px(TEMPLATES[g]), G)
+        for d2, d3, ext in zip(a.pip2d_deg, a.pip_deg, FINGER_STATE[g]):
+            assert (d2 >= 170 and d3 >= 170) if ext else (d2 <= 130 and d3 <= 130), (g, a.pip2d_deg, a.pip_deg)
         if g in ("OPEN_PALM", "THUMBS_UP"):
-            assert a.thumb_wrist_ratio >= G["thumb_ratio"] + 0.15
-            assert a.thumb_cross_cos <= G["thumb_cross_cos"] - 0.3
+            assert a.thumb_tip_ratio >= G["thumb_tip_ratio"] + 0.25, (g, a.thumb_tip_ratio)
         if g == "FIST":
-            assert a.thumb_cross_cos >= G["thumb_cross_cos"] + 0.15
+            assert a.thumb_tip_ratio <= G["thumb_tip_ratio"] - 0.25, a.thumb_tip_ratio
         if g == "OK":
             assert a.tip_gap_ratio <= G["ok_tip_ratio"] - 0.1
 
 
-def test_folded_thumb_not_extended():
-    fist = template("FIST")
-    a = analyze(fist, G)
-    assert a.thumb_wrist_ratio > G["thumb_ratio"] and a.label == "FIST"
-    g2 = dict(G, thumb_cross_cos=1.01)  # direction test always true -> wrist-distance rule only
-    assert classify(fist, g2) == "THUMBS_UP"
+def test_foreshortened_curl_needs_3d():
+    c, s = np.cos(np.radians(70)), np.sin(np.radians(70))
+    rx = np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
+    for g in ("FIST", "THUMBS_UP"):
+        p = template(g) @ rx.T
+        a = analyze(p, px(p), G)
+        assert np.any(a.pip2d_deg > 160), (g, a.pip2d_deg)  # 2D alone reads a curl as straight
+        assert a.label == g, (g, a.label)
+    p = template("FIST") @ rx.T
+    assert classify(p, px(p), dict(G, pip3d_min_deg=-1)) != "FIST"
 
 
 def test_extension_degree():
     for g in GESTURES:
-        e = analyze(TEMPLATES[g], G).e
+        e = analyze(TEMPLATES[g], px(TEMPLATES[g]), G).e
         assert np.all((e >= 0) & (e <= 1))
-    assert np.all(analyze(TEMPLATES["OPEN_PALM"], G).e >= 0.95)
-    assert np.all(analyze(TEMPLATES["FIST"], G).e[1:] <= 0.05)
+    assert np.all(analyze(TEMPLATES["OPEN_PALM"], px(TEMPLATES["OPEN_PALM"]), G).e >= 0.95)
+    assert np.all(analyze(TEMPLATES["FIST"], px(TEMPLATES["FIST"]), G).e[1:] <= 0.05)
     p = template("FIST")
+    q = px(p)
     p[3, 1] = np.nan
-    a = analyze(p, G)
+    a = analyze(p, q, G)
     assert a.label == NONE and np.all(np.isnan(a.e))
+    p = template("FIST")
+    q = px(p)
+    q[3, 1] = np.nan
+    assert analyze(p, q, G).label == NONE
 
 
 def _feed(s, items):

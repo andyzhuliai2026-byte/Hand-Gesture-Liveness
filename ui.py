@@ -41,13 +41,14 @@ def draw(img_bgr: np.ndarray, fr: Frame, pose, smooth: str, stats: dict, debug: 
              f"palm {_f(palm_width_px(fr.lm_px) / w * 100 if ok else None, '.1f')}% of width",
              f"roi mean {_f(fr.roi_mean, '.0f')}  sat {_f(fr.roi_sat_ratio * 100, '.1f')}%"]
     if pose is not None:
-        e, p = pose.e, pose.pip_deg
+        e, p, q = pose.e, pose.pip_deg, pose.pip2d_deg
         lines += [f"e  T{e[0]:.2f} I{e[1]:.2f} M{e[2]:.2f} R{e[3]:.2f} P{e[4]:.2f}",
-                  f"pip  I{p[0]:.0f} M{p[1]:.0f} R{p[2]:.0f} P{p[3]:.0f}  (>{gcfg['pip_extended_deg']})",
-                  f"thumb wrist {pose.thumb_wrist_ratio:.2f} (>{gcfg['thumb_ratio']})  "
-                  f"cross {pose.thumb_cross_cos:+.2f} (<{gcfg['thumb_cross_cos']})  gap {pose.tip_gap_ratio:.2f}"]
+                  f"pip2d  I{q[0]:.0f} M{q[1]:.0f} R{q[2]:.0f} P{q[3]:.0f}  (>{gcfg['pip_extended_deg']})",
+                  f"pip3d  I{p[0]:.0f} M{p[1]:.0f} R{p[2]:.0f} P{p[3]:.0f}  (>{gcfg['pip3d_min_deg']})",
+                  f"thumb tip {pose.thumb_tip_ratio:.2f} (>{gcfg['thumb_tip_ratio']})  "
+                  f"wrist {pose.thumb_wrist_ratio:.2f}  cross {pose.thumb_cross_cos:+.2f}  gap {pose.tip_gap_ratio:.2f}"]
     else:
-        lines += ["e  -", "pip  -", "thumb  -"]
+        lines += ["e  -", "pip2d  -", "pip3d  -", "thumb  -"]
     for i, s in enumerate(lines):
         _text(out, s, (16, 76 + 26 * i), 0.6)
     e = pose.e if pose is not None else np.full(5, np.nan)

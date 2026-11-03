@@ -55,12 +55,13 @@ def score(seq: Sequence, cfg: dict) -> LivenessResult: ...
 | tracker.running_mode | VIDEO | — | brief §2 |
 | tracker.num_hands | 2 | — | brief §5.5 |
 | tracker.min_*_confidence ×3 | 0.5 | — | impl（MediaPipe 默认） |
-| gesture.pip_extended_deg | 160 | ° | brief §4, calib |
-| gesture.thumb_ratio | 1.3 | ×掌宽 | brief §4, calib |
-| gesture.thumb_cross_cos | 0.3 | cos | dev-1, calib |
+| gesture.pip_extended_deg | 160 | °（2D, lm_px） | brief §4, dev-5, calib |
+| gesture.pip3d_min_deg | 110 | °（3D, lm_world） | dev-5, calib |
+| gesture.thumb_tip_ratio | 0.75 | ×掌宽 | dev-5, calib |
 | gesture.ok_tip_ratio | 0.3 | ×掌宽 | brief §4 |
-| gesture.ext_pip_deg | [90, 170] | ° | brief §5.1 |
-| gesture.ext_thumb_ratio | [1.1, 1.5] | ×掌宽 | brief §5.1 |
+| gesture.ext_pip_deg | [90, 170] | °（2D） | brief §5.1, dev-5 |
+| gesture.ext_pip3d_deg | [100, 140] | °（3D） | dev-5, calib |
+| gesture.ext_thumb_ratio | [0.4, 0.9] | ×掌宽 | dev-5, calib |
 | gesture.smooth_window_s | 0.2 | s | brief §4 |
 | roi.size / sat_level | 128 / 250 | px / 灰度 | brief §5.0 / §5.5 |
 
@@ -82,8 +83,9 @@ def score(seq: Sequence, cfg: dict) -> LivenessResult: ...
 | | ::test_wrong_type_fails | bool/字符串冒充数字、PAIR 逆序都抛错 |
 | gesture.py | test_gesture.py::test_templates_classify | 6 模板 ×{原样, 镜像} ×10 随机变换（±30°、0.7–1.3 倍、σ=1% 掌宽）100% 正确 |
 | | ::test_template_margins | 每个模板的判定量离阈值有余量（PIP、拇指两特征、OK 间距） |
-| | ::test_folded_thumb_not_extended | 拇指尖压在食指中节、腕距比 > 1.3 的握拳仍判 FIST（dev-1 回归） |
-| | ::test_extension_degree_range | e ∈ [0,1]，伸直≈1、蜷曲≈0，NaN 输入返回 NaN |
+| | ::test_foreshortened_curl_needs_3d | FIST/THUMBS_UP 模板绕 x 转 70° 后 2D 角被压扁成直，靠 3D 下限仍判对；关掉下限则误判（dev-5 回归） |
+| | ::test_extension_degree | e ∈ [0,1]，伸直≈1、蜷曲≈0，lm_world 或 lm_px 含 NaN 返回 NONE/NaN |
+| | test_smoke_replay.py::test_smoke_replay_accuracy | 本机 smoke 样本按人工真值分段逐帧准确率 ≥ 90%；样本不在本机时整文件 skip（dev-5） |
 | | ::test_smoother_* | 0.2 s 窗内多数、并列 → UNKNOWN、丢检 > 50% → NONE、窗口按时间不按帧 |
 | camera.py | test_camera.py::test_video_dir_uses_npz_t | 样本目录读出的 t 等于 frames.npz 的 t，帧不翻转 |
 | | ::test_video_dir_count_mismatch | npz 行数 ≠ mp4 帧数抛错 |
@@ -107,11 +109,12 @@ def score(seq: Sequence, cfg: dict) -> LivenessResult: ...
 
 ## ⑤ 与 PROMPT.md 的偏差
 
-- **dev-1 拇指判定加一个条件**：拇指伸直 ⇔ |P4−P0|/掌宽 > thumb_ratio **且** cos(P4−P2, P17−P5) < thumb_cross_cos。理由：几何推算显示真实握拳时拇指尖压在食指/中指中节，|P4−P0|/掌宽 ≈ 1.35–1.45，已超过 1.3，单一腕距规则会把 FIST 读成 THUMBS_UP；而折叠拇指一定朝小指侧横跨掌面，方向特征与指尖落点无关。两个阈值都是 calib。M1 debug 层同时显示两项特征，smoke 录制用来核对。
+- **dev-1 拇指判定加一个条件**：拇指伸直 ⇔ |P4−P0|/掌宽 > thumb_ratio **且** cos(P4−P2, P17−P5) < thumb_cross_cos。理由：几何推算显示真实握拳时拇指尖压在食指/中指中节，|P4−P0|/掌宽 ≈ 1.35–1.45，已超过 1.3，单一腕距规则会把 FIST 读成 THUMBS_UP；而折叠拇指一定朝小指侧横跨掌面，方向特征与指尖落点无关。两个阈值都是 calib。M1 debug 层同时显示两项特征，smoke 录制用来核对。（dev-5 已取代其判定，cross 仅保留为调试量）
 - **dev-1 的 M1 证据（表情渲染样本，不是真人）**：✊ 45 帧中位数腕距比 1.97、cross +0.55。只用腕距规则时 100% 的帧会把拇指读成伸直，加上 cross 条件后只剩 4%（2 帧误为 THUMBS_UP）。✋ 的拇指判定正确（腕距 1.84、cross −0.92），但中/无名/小指 PIP 只有 144–153°，低于 160°，整手被读成 POINT_UP。后者多半是表情画风所致；真人放松张开时 PIP 是否也低于 160°，由 M1 摄像头核对时记录。
 - **dev-2 新增两个共享模块**：`liveness/frame.py`（帧契约、ROI、样本读写，属可移植核心）与 `config.py`（严格校验）；§6 目录树没有列出，属必要的契约层。
 - **dev-3** t_switch 由 `score()` 从 frames 现算，不存进 Sequence/录制格式，保证离线可复现。
 - **dev-4** `--record` 只能与 `--camera` 同用。
+- **dev-5 伸直判定换特征（2026-11-03 真手 smoke 证据）**：四指伸直 ⇔ lm_px 上的 2D ∠(MCP,PIP,DIP) > pip_extended_deg **且** lm_world 的 3D 角 > pip3d_min_deg；拇指伸直 ⇔ ‖P4−P6‖/掌宽 > thumb_tip_ratio，不再用腕距比和 cross。证据：真手完全张开时 3D 中指 PIP 中位 137°（2D 177°），160° 在 3D 上过不了，整手读成 UNKNOWN；用户握拳时拇指贴食指外侧不横跨掌面，cross 不触发、腕距比 1.46–2.08，91 帧握拳全读成 THUMBS_UP，e_thumb 在 69/91 帧饱和到 1.0。只用 2D 的问题：蜷曲手指朝镜头时 2D 角被压扁成直（模板 FIST 绕 x 转 70° 读 [159,180,164,150]），所以保留 3D 下限。e 同步改为 e_thumb 由 thumb_tip_ratio 映射、e_finger = min(e2d, e3d)。四个阈值都是 calib，仅凭一人右手 13 s 定的初值，M4 标定；掌心朝镜头的握拳、拇指藏在四指里的握拳还没有真手样本。OPEN_PALM 模板拇指外展方向改为 (-0.85,-0.50,-0.10)。smoke 回放：proc_ms p50 8.7–9.3 / p95 9.0–11.4 ms（两次回放）；新规则逐帧准确率 THUMBS_UP 52/55、FIST 90/91、OPEN_PALM 28/28、V_SIGN 9/9（tests/test_smoke_replay.py，样本只在本机）。第二段录制（2026-11-04，6 手势 × 双手，含拳面/掌心朝镜头两种握拳）：5 个手势双手全对，只有 OK 双手都读成 UNKNOWN——真 OK 环的指尖在 lm_world 里相距 0.37–0.50 倍掌宽（lm_px 上只有 0.08–0.22），所以 OK 的 ‖P4−P8‖ 也改在 lm_px 上算、按像素掌宽归一，阈值仍 0.3。左手 V 时小指翘起（TIM.P）判 UNKNOWN 属姿势本身；该段里无名指 2D 角 173° 看似伸直、3D 角 105° 才判出蜷曲，是 3D 下限在真手上起作用的实例，但离 110° 只有 5°。
 
 ## ⑥ M1 分工（agent-team 编队 A）
 

@@ -45,7 +45,7 @@ def ensure_model(tcfg: dict) -> str:
 
 
 class HandTracker:
-    def __init__(self, tcfg: dict, rcfg: dict, classify: Callable[[np.ndarray], str]):
+    def __init__(self, tcfg: dict, rcfg: dict, classify: Callable[[np.ndarray, np.ndarray], str]):
         self._rcfg, self._classify = rcfg, classify
         opts = vision.HandLandmarkerOptions(
             base_options=mpp.BaseOptions(model_asset_path=tcfg["model_path"]),
@@ -79,7 +79,7 @@ class HandTracker:
         roi_mean, roi_sat = roi_stats(roi, self._rcfg["sat_level"])
         self._last_pos = center
         frame = Frame(float(t), n, True, lm_px, lm_world, float(res.handedness[i][0].score),
-                      self._classify(lm_world), roi_mean, roi_sat, (w, h))
+                      self._classify(lm_world, lm_px), roi_mean, roi_sat, (w, h))
         return frame, roi
 
     def reset(self) -> None:

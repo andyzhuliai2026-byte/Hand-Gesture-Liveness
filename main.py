@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         gcfg = cfg["gesture"]
         sha = ensure_model(cfg["tracker"])
         source = VideoSource(args.video) if args.video else CameraSource(args.camera, cfg["camera"])
-        tracker = HandTracker(cfg["tracker"], cfg["roi"], classify=lambda w: gesture.classify(w, gcfg))
+        tracker = HandTracker(cfg["tracker"], cfg["roi"], classify=lambda w, px: gesture.classify(w, px, gcfg))
         smoother = gesture.LabelSmoother(gcfg["smooth_window_s"])
         if args.record:
             rec = Recorder(Path(args.record), source.fps_nominal, {
@@ -107,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             for t, img in source:
                 t0 = time.perf_counter()
                 fr, _roi = tracker.process(img, t)
-                pose = gesture.analyze(fr.lm_world, gcfg) if fr.present else None
+                pose = gesture.analyze(fr.lm_world, fr.lm_px, gcfg) if fr.present else None
                 smooth = smoother.update(fr.t, fr.raw_label)
                 proc_ms = (time.perf_counter() - t0) * 1000
                 all_proc.append(proc_ms)

@@ -19,12 +19,13 @@ tracker:
   min_tracking_confidence: 0.5         # [impl] MediaPipe default
 
 gesture:
-  pip_extended_deg: 160        # [brief 4][calib] finger extended iff angle(MCP, PIP, DIP) > this, degrees
-  thumb_ratio: 1.3             # [brief 4][calib] thumb extended needs |P4-P0| / palm_width > this ...
-  thumb_cross_cos: 0.3         # [dev-1][calib] ... AND cos(P4-P2, P17-P5) < this (thumb not folded across palm)
-  ok_tip_ratio: 0.3            # [brief 4] OK needs |P4-P8| < this * palm_width
-  ext_pip_deg: [90, 170]       # [brief 5.1] extension degree e (index..pinky): PIP angle 90 -> 0, 170 -> 1
-  ext_thumb_ratio: [1.1, 1.5]  # [brief 5.1] thumb e: |P4-P0| / palm_width 1.1 -> 0, 1.5 -> 1
+  pip_extended_deg: 160        # [brief 4][dev-5][calib] finger extended needs 2D (lm_px) angle(MCP, PIP, DIP) > this, degrees ...
+  pip3d_min_deg: 110           # [dev-5][calib] ... AND lm_world angle > this; real open palm 3D middle p5 136 deg, fist <= 115
+  thumb_tip_ratio: 0.75        # [dev-5][calib] thumb extended iff |P4-P6| / palm_width > this; smoke FIST 0.14-0.53, THUMBS_UP 1.04-1.55, OPEN_PALM 1.08-1.18
+  ok_tip_ratio: 0.3            # [brief 4][dev-5][calib] OK needs 2D |P4-P8| < this * 2D palm width; smoke OK 0.08-0.22 (3D gap 0.37-0.50)
+  ext_pip_deg: [90, 170]       # [brief 5.1] extension degree e (index..pinky): 2D PIP angle 90 -> 0, 170 -> 1
+  ext_pip3d_deg: [100, 140]    # [dev-5] 3D PIP angle 100 -> 0, 140 -> 1; e = min(e2d, e3d)
+  ext_thumb_ratio: [0.4, 0.9]  # [dev-5] thumb e: thumb_tip_ratio 0.4 -> 0, 0.9 -> 1
   smooth_window_s: 0.2         # [brief 4] majority-vote window, seconds (UI and stable-hold only)
 
 roi:

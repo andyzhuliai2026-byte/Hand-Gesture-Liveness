@@ -26,8 +26,8 @@ SCHEMA = {
         "min_tracking_confidence": NUM,
     },
     "gesture": {
-        "pip_extended_deg": NUM, "thumb_ratio": NUM, "thumb_cross_cos": NUM, "ok_tip_ratio": NUM,
-        "ext_pip_deg": PAIR, "ext_thumb_ratio": PAIR, "smooth_window_s": NUM,
+        "pip_extended_deg": NUM, "pip3d_min_deg": NUM, "thumb_tip_ratio": NUM, "ok_tip_ratio": NUM,
+        "ext_pip_deg": PAIR, "ext_pip3d_deg": PAIR, "ext_thumb_ratio": PAIR, "smooth_window_s": NUM,
     },
     "roi": {"size": int, "sat_level": int},
 }

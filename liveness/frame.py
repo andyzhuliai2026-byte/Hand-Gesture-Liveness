@@ -37,6 +37,21 @@ class Frame:
     frame_wh: tuple[int, int]   # (width, height) of the frame in pixels
 
 
+@dataclass
+class Sequence:
+    """One round handed to liveness.score() (PLAN.md 1)."""
+
+    frames: list[Frame]          # COUNTDOWN start -> HOLD end (or the frame that timed out)
+    roi: np.ndarray              # (M, size, size) uint8; blocks in [t0, HOLD end], >= roi_interval_s apart; (0, 0, 0) when none
+    roi_t: np.ndarray            # (M,) float64
+    targets: list[str]
+    t0: float
+    t_hold_start: float | None
+    t_hold_end: float | None
+    hold_match_ratio: float | None
+    frame_wh: tuple[int, int]
+
+
 def empty_frame(t: float, frame_wh: tuple[int, int]) -> Frame:
     """Frame with no hand: present=False, NaN geometry, label NONE."""
     nan = np.full((21, 3), np.nan, np.float32)

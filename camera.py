@@ -96,6 +96,8 @@ class VideoSource:
             ok, frame = self._cap.read()
             if not ok:
                 break
+            if self._ts is not None and i >= len(self._ts):
+                raise SourceError(f"frames.npz has {len(self._ts)} rows but video decodes more frames")
             yield (float(self._ts[i]) if self._ts is not None else i / self.fps_nominal), frame
             i += 1
         if self._ts is not None and i != len(self._ts):

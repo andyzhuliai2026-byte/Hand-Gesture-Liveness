@@ -30,6 +30,20 @@ SCHEMA = {
         "ext_pip_deg": PAIR, "ext_pip3d_deg": PAIR, "ext_thumb_ratio": PAIR, "smooth_window_s": NUM,
     },
     "roi": {"size": int, "sat_level": int},
+    "session": {
+        "countdown_s": NUM, "first_match_frames": int, "first_match_max_s": NUM, "challenge_timeout_s": NUM,
+        "stable_hold_s": NUM, "stable_gap_tol_s": NUM, "hold_s": NUM, "hold_match_min": NUM, "result_s": NUM,
+        "reveal_lookback_s": NUM, "reveal_e_tol": NUM, "wrong_gesture_window_s": NUM, "wrong_gesture_frac": NUM,
+        "roi_interval_s": NUM, "roi_max_blocks": int, "challenge_len": int,
+    },
+    "quality": {
+        "min_palm_frac": NUM, "roi_mean_min": NUM, "roi_mean_max": NUM, "sat_ratio_max": NUM, "hand_score_min": NUM,
+        "qualified_ratio_min": NUM, "qualified_min_frames": int, "two_hands_ratio_max": NUM,
+    },
+    "fusion": {
+        "w_planarity": NUM, "w_texture": NUM, "w_nonrigid": NUM, "planarity_floor": NUM, "texture_floor": NUM,
+        "pass_total": NUM,
+    },
 }
 
 
@@ -61,6 +75,15 @@ def validate(cfg: dict) -> dict:
         raise ConfigError("tracker.running_mode: only VIDEO is supported (PROMPT.md 2)")
     if cfg["tracker"]["num_hands"] < 1:
         raise ConfigError("tracker.num_hands: must be >= 1")
+    if cfg["session"]["challenge_len"] != 1:
+        raise ConfigError("session.challenge_len: only 1 is implemented until M4")
+    f = cfg["fusion"]
+    if abs(f["w_planarity"] + f["w_texture"] + f["w_nonrigid"] - 1.0) > 1e-6:
+        raise ConfigError("fusion: weights w_planarity + w_texture + w_nonrigid must sum to 1")
+    for sec, keys in SCHEMA.items():
+        for key in keys:
+            if key.endswith("_s") and cfg[sec][key] <= 0:
+                raise ConfigError(f"{sec}.{key}: duration must be > 0")
     return cfg
 
 

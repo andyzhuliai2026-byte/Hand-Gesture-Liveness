@@ -31,3 +31,39 @@ gesture:
 roi:
   size: 128                    # [brief 5.0] palm ROI side, px, native resolution
   sat_level: 250               # [brief 5.5] gray level counted as saturated
+
+session:
+  countdown_s: 1.0             # [brief 3.1]
+  first_match_frames: 3        # [brief 5.1] first match = raw label == target on this many consecutive detected frames
+  first_match_max_s: 4.0       # [brief 3.1] first match must start within t0 + this, else FAIL(TIMEOUT)
+  challenge_timeout_s: 5.0     # [brief 3.1] stable hold must complete within t0 + this, else FAIL(TIMEOUT / WRONG_GESTURE)
+  stable_hold_s: 0.5           # [brief 3.1] smooth label == target for this long -> HOLD
+  stable_gap_tol_s: 0.1        # [brief 3.1] accumulated non-target / undetected time tolerated inside the stable hold
+  hold_s: 1.5                  # [brief 3.1] HOLD always runs this long
+  hold_match_min: 0.7          # [brief 3.1] hold_match_ratio below this -> INSUFFICIENT(HOLD_BROKEN) in score()
+  result_s: 3.0                # [brief 3.1] RESULT page, then IDLE
+  reveal_lookback_s: 0.5       # [brief 3.1] labels seen within this before the reveal are excluded from the draw
+  reveal_e_tol: 0.5            # [brief 3.1] |e_i - e*_i| < this on every participating finger -> gesture excluded
+  wrong_gesture_window_s: 1.0  # [brief 3.1]
+  wrong_gesture_frac: 0.5      # [brief 3.1]
+  roi_interval_s: 0.1          # [brief 5.0] one ROI block per >= this within [t0, HOLD end]
+  roi_max_blocks: 70           # [brief 5.0] oldest dropped beyond this
+  challenge_len: 1             # [brief 3.4] 2 arrives in M4; M2 accepts only 1
+
+quality:
+  min_palm_frac: 0.08          # [brief 5.5] pixel palm width / frame width
+  roi_mean_min: 40             # [brief 5.5]
+  roi_mean_max: 220            # [brief 5.5]
+  sat_ratio_max: 0.10          # [brief 5.5]
+  hand_score_min: 0.7          # [brief 5.5]
+  qualified_ratio_min: 0.6     # [brief 5.5] over [t0, HOLD end]
+  qualified_min_frames: 15     # [brief 5.5]
+  two_hands_ratio_max: 0.2     # [brief 5.5] n_hands >= 2 frames / window frames
+
+fusion:
+  w_planarity: 0.65            # [brief 5.6]
+  w_texture: 0.20              # [brief 5.6]
+  w_nonrigid: 0.15             # [brief 5.6]
+  planarity_floor: 0.4         # [brief 5.6][calib] M4: max value with FRR = 0 on calib, <= initial + 0.2
+  texture_floor: 0.3           # [brief 5.6][calib]
+  pass_total: 0.6              # [brief 5.6]

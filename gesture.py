@@ -17,6 +17,10 @@ from liveness.frame import NONE, UNKNOWN
 
 _EPS = 1e-9  # palm width below this is degenerate
 
+TARGET_E = {  # PROMPT.md 4, thumb..pinky; None = finger not judged (*)
+    "OK": (None, None, 1.0, 1.0, 1.0), "OPEN_PALM": (1.0, 1.0, 1.0, 1.0, 1.0), "FIST": (0.0, 0.0, 0.0, 0.0, 0.0),
+    "THUMBS_UP": (1.0, 0.0, 0.0, 0.0, 0.0), "V_SIGN": (None, 1.0, 1.0, 0.0, 0.0), "POINT_UP": (None, 1.0, 0.0, 0.0, 0.0)}
+
 
 @dataclass(frozen=True)
 class HandPose:

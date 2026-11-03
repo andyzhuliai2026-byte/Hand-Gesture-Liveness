@@ -125,3 +125,30 @@ def score(seq: Sequence, cfg: dict) -> LivenessResult: ...
 | builder-io | sonnet | camera.py、hand_tracker.py、tests/test_camera.py、test_tracker.py、test_frame.py、test_config.py |
 | builder-app（第二波） | sonnet | ui.py、main.py、tests/test_main.py |
 | verifier | sonnet | pytest、纯度 grep、合成视频与表情手 headless 冒烟、bench |
+
+## ⑦ M2 决策与分工（2026-11-04）
+
+规格书全文在会话临时目录（SPEC_M2.md），要点与任务书外的决定：
+
+- **D1 状态机输出即 UI 契约**：`session.update()` 每帧返回 `SessionOutput`，字段名与另一会话设计的 HUD 的 ui 字典一致（phase / t_in_phase / phase_len / prompt / target / stable_progress / first_match / hint / verdict / reasons / reason_text / scores / total / smooth_label / e / palm_ratio / quality_ok），HUD 以后可以直接替换 ui.py。
+- **D2 首次匹配的"连续 ≥ 3 个检测帧"**：present=False 的帧打断连续段（保守解释）；t_match 取连续段首帧。
+- **D3 稳定保持**：以 stable_start 起算的经过时间 ≥ 0.5 s 即完成，期间非目标/丢检的累计时长 ≤ 0.1 s 不清零，超过即清零重计。
+- **D4 超时回合**：不构造 Sequence、不调 score()；录制仍落盘（t_hold_* 与 hold_match_ratio 为 null，roi 为空）。WRONG_GESTURE 只在 5.0 s 超时分支判定；4.0 s 首次匹配超时一律 TIMEOUT。
+- **D5 目标抽取**：`random.Random(seed).choice(sorted(候选))`；候选为空用全部 6 个；`--target` 固定且不排除。
+- **D6 ROI 块由 session 收集**（纯逻辑，只看 ndarray 与时间戳）：[t0, HOLD 结束]、间隔 ≥ 0.1 s、最多 70 块丢最早；离线重放用样本里存的块（`external_roi`）。
+- **D7 Sequence.frames 与 frames.npz 相同**：从 ROUND_START 帧到进入 RESULT 的那一帧（含），RESULT 页的帧不录。
+- **D8 logs/sessions.jsonl 只在摄像头模式写**；`--video` 重放不写日志。
+- **D9 `--video` 结束时 headless 总是打印一行结果 JSON**（没有完成的回合 verdict 为 null），`--bench` 的指标并入同一行。
+- **D10 fusion 的第 2/3 步现在就按 §5.6 通用实现（liveness/fusion.py）**，M2 只是分数全为占位 1.0；M3 只替换分数来源。
+- **D11 r 键在 COUNTDOWN/CHALLENGE/HOLD 删除本进程刚建的未完成样本目录**（shutil.rmtree），这是"丢弃尚未落盘的回合"的实现；RESULT 里的 x 只改 meta.discard。
+
+分工：builder A（契约层）→ builder B（session.py）→ builder C1（main/ui/README/Recorder）∥ builder C2（tools/evaluate + roundtrip）→ verifier → critic（fable：状态机语义；opus：录制格式与评测）→ 主会话审 diff、提交。
+
+M2 评审后的补充决定（fable 审状态机、opus 审录制格式与评测，2026-11-04）：
+- **D12 首次匹配截止按连续段首帧算**（§5.1 原文：t_match = 连续段首帧时间）：截止时若有进行中的连续段且其首帧 ≤ t0 + 4.0 s，不判超时；规格书 §0.3 第 4 条原写法与任务书冲突，已改。
+- **D13 进 HOLD 必须已首次匹配**：稳定保持完成但没有 3 个连续原始匹配帧（标签抖动）时不进 HOLD，最终走超时；否则 M3 的 §5.1 拿不到 t_match。
+- **D14 WRONG_GESTURE 两个超时分支都判**：4.0 s 首次匹配超时也按"最后 1 s ≥ 50% 同一非目标已知手势"改原因，不然从头做错手势的人只能看到 "Timeout"。evaluate 两者都归"未到达活体检查"，不影响指标。
+- **D15 单列样本按 (类别, variant)**：real/still、attack_replay/preplay、attack_*/handheld 三种单列；attack_replay 的 still/moving 按 §7.3 "各半" 参与通过率与切分。任务书 §7.3 末段"variant ∈ {still,preplay,handheld} 不参与切分"与同节 B 类"still/moving 各半"相抵触，取后者。
+- **D16 real 的 n 计入 TIMEOUT / WRONG_GESTURE / 无结果样本**（§7.5 "n = test 半区该类样本数"），都算未通过；攻击类维持排除并单列。
+- **D17 split=test 任一判据 n = 0 视为未达标、没有样本退出 1**，避免零证据判"达标"。
+- **D18 `--meta` 可重复给、`--record` 目录名限定六个类别**，防止样本落盘后才发现元数据缺失（data/ 下的样本不可改）。

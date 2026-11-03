@@ -64,3 +64,21 @@ def test_running_mode(cfg):
     cfg["tracker"]["running_mode"] = "IMAGE"
     with pytest.raises(ConfigError):
         validate(cfg)
+
+
+def test_challenge_len(cfg):
+    cfg["session"]["challenge_len"] = 2
+    with pytest.raises(ConfigError, match="challenge_len"):
+        validate(cfg)
+
+
+def test_weights_sum(cfg):
+    cfg["fusion"]["w_texture"] = 0.3
+    with pytest.raises(ConfigError, match="weights"):
+        validate(cfg)
+
+
+def test_durations_positive(cfg):
+    cfg["session"]["hold_s"] = 0
+    with pytest.raises(ConfigError, match="hold_s"):
+        validate(cfg)

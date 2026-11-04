@@ -17,7 +17,8 @@ def fuse(scores: dict, insufficient: list[str], vetoes: list[str], fcfg: dict) -
     if vetoes:
         return "FAIL", None, _ordered(vetoes, VETO_ORDER)
     if any(scores[k] is None for k in _LOSS_REASON):
-        raise ValueError(f"fuse: None score in {scores}")  # ponytail: M3 decides how a missing score maps to a verdict
+        # unreachable from score(): it maps every None score to an INSUFFICIENT code first (PLAN dev-7)
+        raise ValueError(f"fuse: None score in {scores}")
     w = {k: fcfg[f"w_{k}"] for k in _LOSS_REASON}
     total = sum(w[k] * scores[k] for k in _LOSS_REASON)
     floors = (["PLANAR"] if scores["planarity"] < fcfg["planarity_floor"] else []) + \

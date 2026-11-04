@@ -139,23 +139,42 @@ def test_sample_npz_shorter_than_video(tmp_path):
     src.close()
 
 
-def test_ui_result_has_no_top_left_prompt(monkeypatch):
-    import types
-
+def test_ui_draws_a_real_round(monkeypatch):
+    """Real Session outputs for a whole live round (tests.test_roundtrip.live_hand) drive ui.draw -> hud.draw:
+    every phase renders, the HOLD tilt instrument is live, the RESULT page gets the verdict."""
+    import gesture
+    import hud
+    import session as S
     import ui
-    calls = []
-    monkeypatch.setattr(ui, "_text", lambda img, s, org, *a, **k: calls.append((s, org)))
-    out = types.SimpleNamespace(phase="RESULT", prompt="Timeout", target="FIST", verdict="FAIL", reason_text="Timeout",
-                                hint=None, quality_ok=None, smooth_label="NONE", t_in_phase=0.0, stable_progress=1.0)
     from config import load_config
-    ui.draw(np.zeros((720, 1280, 3), np.uint8), empty_frame(0.0, (1280, 720)), None, out,
-            {"fps": 30.0, "proc_ms": 1.0}, False, load_config("config.yaml"))
-    assert (("Timeout", (16, 40)) not in calls) and [c for c in calls if c[0] == "Timeout"]
-    out.phase, out.prompt = "IDLE", "Press SPACE to start"
-    calls.clear()
-    ui.draw(np.zeros((720, 1280, 3), np.uint8), empty_frame(0.0, (1280, 720)), None, out,
-            {"fps": 30.0, "proc_ms": 1.0}, False, load_config("config.yaml"))
-    assert ("Press SPACE to start", (16, 40)) in calls
+    from liveness import score
+    from tests.test_roundtrip import live_hand
+    cfg = load_config("config.yaml")
+    monkeypatch.setattr(ui, "_ST", hud.HudState())
+    s = S.Session(cfg, lambda seq: score(seq, cfg), target="V_SIGN")
+    s.key("space")
+    rng, img = np.random.default_rng(0), np.full((720, 1280, 3), 90, np.uint8)
+    t_rev = t_hold = t_res = None
+    seen, tilts, verdicts = set(), [], set()
+    for i in range(400):
+        t = i / 30
+        fr, roi = live_hand(t, t_rev, t_hold, 120.0, cfg, rng)
+        out = s.update(fr, roi)
+        t_rev = t if t_rev is None and s.state not in (S.IDLE, S.COUNTDOWN) else t_rev
+        t_hold = t if t_hold is None and s.state == S.HOLD else t_hold
+        pose = gesture.analyze(fr.lm_world, fr.lm_px, cfg["gesture"])
+        canvas = ui.draw(img, fr, pose, out, {"fps": 30.0, "proc_ms": 9.0, "recording": False}, i % 2 == 0, cfg)
+        assert canvas.shape == img.shape and canvas.dtype == np.uint8 and not np.array_equal(canvas, img)
+        seen.add(out.phase)
+        if out.phase == "HOLD":
+            tilts.append(ui._ST.tilt_max - ui._ST.tilt_min)
+        if out.phase == "RESULT":
+            verdicts.add(out.verdict)
+            t_res = t if t_res is None else t_res
+        if t_res is not None and out.phase == "IDLE":
+            break
+    assert seen == {"IDLE", "COUNTDOWN", "CHALLENGE", "HOLD", "RESULT"} and verdicts == {"PASS"}
+    assert max(tilts) > 1.5 * cfg["planarity"]["min_normal_deg"]  # the +-20 deg turn fills the tilt target
 
 
 SMOKE = ROOT / "data" / "smoke" / "20261104-005418"
@@ -251,3 +270,21 @@ def test_recorder_flow(tmp_path):
     rec.mark_discard()
     assert json.loads((d / "meta.json").read_text())["discard"] is True
     rec.close()
+
+
+def test_recorder_close_mid_round_discards(tmp_path):
+    """PLAN D11: close() during a round (q / window close / Ctrl-C / error / --max-frames) drops it like r."""
+    from main import Recorder
+    rec = Recorder(tmp_path / "cls", 30.0, {})
+    img = np.full((720, 1280, 3), 100, np.uint8)
+    frames = [empty_frame(i * 0.033, (1280, 720)) for i in range(3)]
+    rec.start_round(0.0, (1280, 720))
+    rec.add(frames[0], img)
+    d = rec.finish(frames[:1], None, None, {})
+    rec.start_round(0.0, (1280, 720))
+    for fr in frames[1:]:
+        rec.add(fr, img)
+    gone = rec.dir
+    rec.close()
+    assert not gone.exists() and rec.dir is None
+    assert d.exists() and (d / "meta.json").exists() and (d / "video.mp4").exists()  # finished sample untouched

@@ -1,10 +1,15 @@
 """Offline evaluation (PROMPT.md 7.3-7.5): replay recorded rounds through session + liveness.score.
 
-Reads frames.npz + meta.json only; never the video, never MediaPipe.
-    python -m tools.evaluate [--data data] [--split calib|test|all] [--challenge-len 1] [--gestures]
-                             [--config config.yaml] [--out reports]
-Exit code: --split test -> 0 when every 7.5 criterion holds, else 1 (a criterion with n = 0 does not hold,
-no samples at all -> 1); other splits -> 0.
+Reads frames.npz + meta.json only; never the video, never MediaPipe. raw_label of every present frame is
+recomputed with the current gesture config before replay and gesture stats (PLAN S7), never taken from the recording.
+    .venv/bin/python -m tools.evaluate [--data data] [--split calib (default)|test|all] [--challenge-len 1] [--gestures]
+                                       [--config config.yaml] [--out reports]
+Exit code: --split test -> 0 when every 7.5 criterion that is not WARN-only holds, else 1 (a criterion with
+n = 0 does not hold, no samples at all -> 1). attack_replay is WARN-only per 7.5 (a target: missing it is not a
+delivery failure, but the failure report is required), so a miss or n = 0 there keeps exit 0 while
+failure_<sha8>.md is still written. 2, with no report, when config.yaml fails validation, or when this run is
+`test` / `all` with test-half samples and <out>/test_runs.json already holds 2 such runs (`calib` never counts nor
+is refused). `calib` and `all` otherwise -> 0.
 """
 from __future__ import annotations
 
@@ -13,12 +18,14 @@ import json
 import sys
 import time
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
+import gesture
 import session
-from config import config_sha8, load_config
+from config import ConfigError, config_sha8, load_config
 from gesture import LabelSmoother
 from liveness import score
 from liveness.frame import GESTURES, load_sample
@@ -37,6 +44,11 @@ LOSS_KEYS = ("planarity", "texture", "nonrigid")  # the fused scores (5.6)
 DEBUG_KEYS = ("t_r", "gap_max_s", "R", "rho", "M", "qualified_ratio", "two_hands_ratio", "hold_match_ratio")
 VETO_KEYS = {"PRERECORDED": "veto_prerecorded", "INSTANT_SWITCH": "veto_instant_switch", "PLANAR": "veto_planar"}
 UNREACHED = ("TIMEOUT", "WRONG_GESTURE")  # the round never reached the liveness check
+DIST_KEYS = ("max_ext_rate_observed", "R", "M", "r", "z_spread")  # [brief 5.1, 5.3] report only, z never scored
+MEDIUM_ROWS = {"attack_replay/phone": ("phone",), "attack_replay/tablet+monitor": ("tablet", "monitor")}  # [brief 5.4]
+TEST_RUNS_MAX = 2            # [brief 7.5] the test half runs at most twice
+DEBUG_PRINT = ("t_r", "F", "max_ext_rate_observed", "gap_max_s", "t_switch", "r", "R", "rho", "n_pairs",  # [brief 5.6]
+               "normal_angles", "M", "n_roi", "qualified_ratio", "two_hands_ratio", "hold_match_ratio")
 
 
 # ---------------------------------------------------------------- samples
@@ -68,12 +80,20 @@ def assign_halves(samples: list[dict]) -> None:
         s["half"] = "calib" if count[s["cls"]] % 2 else "test"
 
 
+def relabel(frames: list, gcfg: dict) -> tuple[list, int]:
+    """raw_label of present frames recomputed with gcfg (absent frames keep theirs). -> (frames, n changed)"""
+    out = [replace(f, raw_label=gesture.classify(f.lm_world, f.lm_px, gcfg)) if f.present else f for f in frames]
+    return out, sum(a.raw_label != b.raw_label for a, b in zip(frames, out))
+
+
 def replay_sample(d, cfg: dict):
-    """-> (frames, meta, LivenessResult of the replayed RESULT event, or None when the recording has none)."""
+    """-> (relabeled frames, meta, LivenessResult of the replayed RESULT event or None when there is none,
+    number of present frames whose label changed). Session and score() both see the current config's labels."""
     frames, meta, roi, roi_t = load_sample(d)
+    frames, n_changed = relabel(frames, cfg["gesture"])
     _, events = session.replay(frames, cfg, lambda seq: score(seq, cfg), meta["targets"], meta["t0"], roi, roi_t)
     res = [e.data["result"] for e in events if e.kind == "RESULT"]
-    return frames, meta, res[0] if res else None
+    return frames, meta, res[0] if res else None, n_changed
 
 
 def _close(a, b) -> bool:
@@ -83,11 +103,18 @@ def _close(a, b) -> bool:
     return a.shape == b.shape and bool(np.allclose(a, b, rtol=1e-5, equal_nan=True))
 
 
-def roundtrip(live: dict, res, same_config: bool) -> tuple[str, list[str]]:
-    """meta["live"] vs the replayed result. Same config sha8: verdict, reasons, scores; otherwise only the
-    threshold-free debug values both sides have. -> ("full" | "debug", differing fields)"""
+def roundtrip(live: dict, res, same_config: bool, n_relabel: int = 0) -> tuple[str, list[str]]:
+    """meta["live"] vs the replayed result (None: no RESULT). Same config sha8: verdict, reasons, scores, and
+    no relabeled frame; config changed: labels relabeled -> "drift" (expected, not a mismatch), else only the
+    threshold-free debug values both sides have. -> ("full" | "debug" | "drift" | "replay", fields)"""
+    if not same_config and n_relabel:
+        return "drift", [f"{n_relabel} frames relabeled"] + (["no result"] if res is None else [])
+    same_labels = [f"labels differ from the recording under the same config ({n_relabel} frames)"] \
+        if same_config and n_relabel else []
+    if res is None:
+        return "replay", ["no result"] + same_labels
     if same_config:
-        diffs = [k for k in ("verdict", "reasons") if live[k] != getattr(res, k)]
+        diffs = [k for k in ("verdict", "reasons") if live[k] != getattr(res, k)] + same_labels
         keys = sorted(set(live["scores"]) | set(res.scores))
         return "full", diffs + [f"scores.{k}" for k in keys if k not in live["scores"] or k not in res.scores
                                 or not _close(live["scores"][k], res.scores[k])]
@@ -112,16 +139,28 @@ def _unreached(res) -> bool:
     return bool(res.reasons) and res.reasons[0] in UNREACHED
 
 
+def _valid(ss: list[dict]) -> list[dict]:
+    """Samples whose round reached the liveness check."""
+    return [s for s in ss if s["res"] is not None and not _unreached(s["res"])]
+
+
+def _finite(xs) -> list[float]:
+    return [float(x) for x in xs if isinstance(x, (int, float, np.number)) and not isinstance(x, bool)
+            and np.isfinite(x)]
+
+
 def class_stats(ss: list[dict], count_unreached: bool = False) -> dict:
     """n counts samples that reached the liveness check, timeouts and missing results listed apart;
     count_unreached (real) puts them in n as well, as not passed."""
-    valid = [s for s in ss if s["res"] is not None and not _unreached(s["res"])]
+    valid = _valid(ss)
     verdicts = Counter(s["res"].verdict for s in valid)
     return {
-        "n": len(ss) if count_unreached else len(valid), **{v: verdicts[v] for v in VERDICTS},
+        "n": len(ss) if count_unreached else len(valid), "n_reached": len(valid), **{v: verdicts[v] for v in VERDICTS},
         "scores": {k: [s["res"].scores[k] for s in valid if k in s["res"].scores and s["res"].scores[k] is not None]
                    for k in SCORE_KEYS},
         "insufficient": Counter(r for s in valid if s["res"].verdict == "INSUFFICIENT" for r in s["res"].reasons),
+        "fail": Counter(r for s in valid if s["res"].verdict == "FAIL" for r in s["res"].reasons),
+        "debug": {k: _finite(s["res"].debug.get(k) for s in valid) for k in DIST_KEYS},
         # hard-veto hit rate from debug, independent of the 5.6 order; n/a until M3 writes the keys
         "veto": {c: None if not valid or any(k not in s["res"].debug for s in valid)
                  else sum(bool(s["res"].debug[k]) for s in valid) / len(valid) for c, k in VETO_KEYS.items()},
@@ -136,13 +175,23 @@ def _variant_hit(variant: str, res) -> bool:
                                    and bool(res.debug[VETO_KEYS[code]]))
 
 
+def r_by_target(ss: list[dict]) -> dict:
+    """5.3 debug R of the samples that reached the check, by target gesture (meta targets[0]) and class."""
+    out = {g: {c: [] for c in CLASSES} for g in GESTURES}
+    for s in _valid(ss):
+        out[s["meta"]["targets"][0]][s["cls"]].append(s["res"].debug.get("R"))
+    return out
+
+
 def gesture_stats(ss: list[dict], cfg: dict) -> dict:
-    """Present frames with t >= t0 + 1 s: raw label 6x6 confusion (rows = target), raw and smoothed accuracy."""
+    """Present frames with t >= t0 + 1 s: raw label 6x6 confusion (rows = target), raw and smoothed accuracy;
+    labels recomputed with cfg["gesture"], never the recorded ones."""
     idx = {g: i for i, g in enumerate(GESTURES)}
     m, other = np.zeros((6, 6), int), Counter()
     n, hit = Counter(), Counter()
     for s in ss:
         frames, meta, _, _ = load_sample(s["dir"])
+        frames, _ = relabel(frames, cfg["gesture"])
         tgt, t_from = meta["targets"][0], meta["t0"] + GESTURE_SETTLE_S
         sm = LabelSmoother(cfg["gesture"]["smooth_window_s"])
         for fr in frames:
@@ -204,12 +253,42 @@ def _counts(c: Counter) -> str:
     return ", ".join(f"{k} {v}" for k, v in sorted(c.items())) or "-"
 
 
+def _pcts(v: list) -> str:
+    """'n: p5 / p50 / p95' of the finite values, '-' when none."""
+    v = _finite(v)
+    return f"{len(v)}: " + " / ".join(f"{x:.4g}" for x in np.percentile(v, [5, 50, 95])) if v else "-"  # r, z ~ 1e-3
+
+
 def _auc_cell(a) -> str:
     return "n/a" if a is None else f"{a:.3f}" + (" (<0.7)" if a < 0.7 else "")
 
 
 def _name(s: dict) -> str:
     return f"{s['cls']}/{s['dir'].name}"
+
+
+def _dcell(k: str, v) -> str:
+    """One DEBUG_PRINT value: '-' when missing; F ints, t_switch 2 decimals, normal_angles 'n=.. max=..'."""
+    if v is None:
+        return "-"
+    if k == "F":
+        return ",".join(str(int(x)) for x in v) or "-"
+    if k == "t_switch":
+        return ",".join(f"{x:.2f}" for x in (v if isinstance(v, (list, tuple)) else [v])) or "-"
+    if k == "normal_angles":
+        return f"n={len(v)} max={max(v):.4g}" if len(v) else "-"
+    return f"{v:.4g}" if isinstance(v, (float, np.floating)) else str(v)
+
+
+def debug_rows(ss: list[dict]) -> list[str]:
+    """5.6 debug set per replayed sample (gestures class excluded)."""
+    lines = [_row(["sample", "class", "verdict", *DEBUG_PRINT]), _row(["---"] * (len(DEBUG_PRINT) + 3))]
+    for s in ss:
+        r = s["res"]
+        dbg = r.debug if r is not None else {}
+        lines.append(_row([_name(s), s["cls"], r.verdict if r is not None else "no result",
+                           *(_dcell(k, dbg.get(k)) for k in DEBUG_PRINT)]))
+    return lines
 
 
 def _largest_loss(scores: dict, fcfg: dict) -> str:
@@ -222,26 +301,37 @@ def _largest_loss(scores: dict, fcfg: dict) -> str:
 
 def class_table(st: dict) -> list[str]:
     head = (["class", "n", *VERDICTS, "pass rate", *SCORE_KEYS, *(f"AUC {k}" for k in SCORE_KEYS),
-             "INSUFFICIENT reasons", *(f"veto {c}" for c in VETO_KEYS), *UNREACHED, "no result"])
+             "INSUFFICIENT reasons", "FAIL reasons", *(f"veto {c}" for c in VETO_KEYS), *UNREACHED, "no result"])
     lines = [_row(head), _row(["---"] * len(head))]
-    for c in CLASSES:
+    for c in st:  # CLASSES, then the attack_replay medium rows (5.4, report only)
         r = st[c]
         auc = (["-"] * 4 if c == "real" else
                [_auc_cell(_auc(st["real"]["scores"][k], r["scores"][k])) for k in SCORE_KEYS])
         lines.append(_row([c, r["n"], *(r[v] for v in VERDICTS), _f(r["PASS"] / r["n"] if r["n"] else None),
-                           *(_ms(r["scores"][k]) for k in SCORE_KEYS), *auc, _counts(r["insufficient"]),
+                           *(_ms(r["scores"][k]) for k in SCORE_KEYS), *auc, _counts(r["insufficient"]), _counts(r["fail"]),
                            *(_f(r["veto"][v]) for v in VETO_KEYS), *(r["unreached"][u] for u in UNREACHED),
                            r["no_result"]]))
     return lines
 
 
-def render(split, sha8, sel, st, special, mismatches, gest, crit, warns) -> str:
+def render(split, sha8, sel, st, special, mismatches, gest, crit, warns, by_target, drift=()) -> str:
     L = [f"# Evaluation: split {split}", "",
          f"config sha8 {sha8} | time {time.strftime('%Y-%m-%dT%H:%M:%S')} | samples {len(sel)}", "",
          "## Classes", "",
          "n: real counts every sample (TIMEOUT / WRONG_GESTURE / no result count as not passed); attack rows "
          "count samples that reached the liveness check (TIMEOUT / WRONG_GESTURE listed apart as not reached).", "",
-         *class_table(st), "", "## Variant rows (7.5, report only)", ""]
+         *class_table(st), "", "attack_replay/<medium> rows: report only, never in the 7.5 criteria.", "",
+         "## R by target gesture (5.3)", "", "cell: n: p5 / p50 / p95 of finite debug R", "",
+         _row(["target", *CLASSES]), _row(["---"] * (len(CLASSES) + 1)),
+         *(_row([g, *(_pcts(by_target[g][c]) for c in CLASSES)]) for g in GESTURES), "",
+         "## Debug distributions", "",
+         "cell: n: p5 / p50 / p95 over samples that reached the check; attack_switch is judged by "
+         "max_ext_rate_observed (5.1); z_spread is reported, never scored (5.3).", "",
+         _row(["class", "n reached", *DIST_KEYS]), _row(["---"] * (len(DIST_KEYS) + 2)),
+         *(_row([c, st[c]["n_reached"], *(_pcts(st[c]["debug"][k]) for k in DIST_KEYS)]) for c in CLASSES), "",
+         "## Debug per sample (5.6)", "", "every replayed sample of the split, variant rows included; - = missing", "",
+         *debug_rows([s for s in sel if s["cls"] != GESTURE_CLASS]), "",
+         "## Variant rows (7.5, report only)", ""]
     if special:
         L += [_row(["variant", "expected", "n", "hit rate", "status"]), _row(["---"] * 5)]
         L += [_row([v, SPECIAL[v], n, _f(rate), "WARN" if rate is None or rate < SPECIAL_MIN else "ok"])
@@ -257,6 +347,8 @@ def render(split, sha8, sel, st, special, mismatches, gest, crit, warns) -> str:
     L += ["", "## Roundtrip", ""]
     L += [f"- {name} ({branch}): {', '.join(diffs)}" for name, branch, diffs in mismatches] or \
          ["Roundtrip: all consistent"]
+    L += ["", "## Label drift (gesture config changed)", ""]
+    L += [f"- {name}: {', '.join(diffs)}" for name, _, diffs in drift] or ["none"]
     if crit:
         L += ["", "## Criteria (7.5, test half)", "", _row(["criterion", "n", "actual", "target", "status"]),
               _row(["---"] * 5)]
@@ -276,7 +368,10 @@ def render_failure(sha8, crit, test_samples, calib_st, fcfg) -> str:
           _row(["sample", "verdict", "reasons", *SCORE_KEYS, "largest loss"]), _row(["---"] * 8)]
     for s in test_samples:
         r = s["res"]
-        if r is not None and (r.verdict == "PASS") == (s["cls"] in ATTACKS):
+        if r is None and s["cls"] == "real":  # counted as not passed (D16)
+            L.append(_row([_name(s), "no result", f"{s['relabel']} frames relabeled" if s["relabel"] else "-",
+                           *["n/a"] * len(SCORE_KEYS), "n/a"]))
+        elif r is not None and (r.verdict == "PASS") == (s["cls"] in ATTACKS):
             L.append(_row([_name(s), r.verdict, ", ".join(r.reasons) or "-",
                            *(_f(r.scores[k]) if k in r.scores else "n/a" for k in SCORE_KEYS),
                            _largest_loss(r.scores, fcfg)]))
@@ -300,9 +395,9 @@ def _fresh(path: Path) -> Path:
 
 
 def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="python -m tools.evaluate", description=__doc__.split("\n")[0])
+    p = argparse.ArgumentParser(prog=".venv/bin/python -m tools.evaluate", description=__doc__.split("\n")[0])
     p.add_argument("--data", default="data")
-    p.add_argument("--split", choices=("calib", "test", "all"), default="all")
+    p.add_argument("--split", choices=("calib", "test", "all"), default="calib")
     p.add_argument("--challenge-len", type=int, choices=(1, 2), default=1)
     p.add_argument("--gestures", action="store_true", help="6x6 confusion matrix and per-gesture accuracy")
     p.add_argument("--config", default="config.yaml")
@@ -312,24 +407,42 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     a = _parser().parse_args(argv)
-    cfg, sha8 = load_config(a.config), config_sha8(a.config)
+    try:
+        cfg, sha8 = load_config(a.config), config_sha8(a.config)
+    except ConfigError as e:              # same contract as main.py: error message, exit 2
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     samples = discover(Path(a.data), a.challenge_len)
     if not samples:
         print("no samples" + (": nothing to judge on the test split" if a.split == "test" else ""))
         return 1 if a.split == "test" else 0
     assign_halves(samples)
+    out = Path(a.out)
+    ledger, n_test = out / "test_runs.json", sum(s["half"] == "test" for s in samples)
+    counted = a.split in ("test", "all") and n_test > 0  # every run that shows test-half results [brief 7.5]
+    runs = json.loads(ledger.read_text(encoding="utf-8")) if counted and ledger.is_file() else []
+    if counted and len(runs) >= TEST_RUNS_MAX:
+        print(f"refused: --split {a.split} includes the test half and {ledger} already records {len(runs)} "
+              f"test-half runs (7.5: at most {TEST_RUNS_MAX}; DESIGN.md must record what changed and its calib "
+              "evidence before the 2nd)", file=sys.stderr)
+        return 2
     for s in samples:
-        s["res"] = replay_sample(s["dir"], cfg)[2] if s["cls"] != GESTURE_CLASS else None
+        s["res"], s["relabel"] = replay_sample(s["dir"], cfg)[2:] if s["cls"] != GESTURE_CLASS else (None, 0)
 
     sel = [s for s in samples if a.split == "all" or s["half"] in (a.split, "special")]
     live = [s for s in sel if s["cls"] != GESTURE_CLASS]
-    mismatches = [(_name(s), *rt) for s in live if s["res"] is not None
-                  for rt in [roundtrip(s["meta"]["live"], s["res"], s["meta"]["config_sha8"] == sha8)] if rt[1]]
-    mismatches += [(_name(s), "replay", ["no result"]) for s in live if s["res"] is None]
+    rts = [(_name(s), *roundtrip(s["meta"]["live"], s["res"], s["meta"]["config_sha8"] == sha8, s["relabel"]))
+           for s in live]
+    mismatches = [r for r in rts if r[1] != "drift" and r[2]]
+    drift = [r for r in rts if r[1] == "drift"]
 
     def stats(ss):
-        return {c: class_stats([s for s in ss if s["cls"] == c and s["half"] != "special"], c == "real")
-                for c in CLASSES}
+        res = {c: class_stats([s for s in ss if s["cls"] == c and s["half"] != "special"], c == "real")
+               for c in CLASSES}
+        rep = [s for s in ss if s["cls"] == "attack_replay" and s["half"] != "special"]
+        res.update({row: class_stats([s for s in rep if s["meta"]["medium"] in media])
+                    for row, media in MEDIUM_ROWS.items()})
+        return res
 
     st = stats(sel)
     special = {}
@@ -345,11 +458,23 @@ def main(argv=None) -> int:
     warns = [f"variant {v}: {SPECIAL[v]} hit rate {_f(rate)} < {SPECIAL_MIN}" for v, (_, rate) in special.items()
              if rate is None or rate < SPECIAL_MIN]
     warns += [f"{c['name']}: {_f(c['actual'])} (target {c['target']})" for c in crit if c["warn_only"] and not c["ok"]]
-    text = render(a.split, sha8, sel, st, special, mismatches, gest if a.gestures else None, crit, warns)
-    out = Path(a.out)
+    # ponytail: visibility only; whether these leave n (D16) or keep the recorded HOLD timing is the user's call
+    warns += [f"{_name(s)}: {s['relabel']} frames relabeled and the replay has no RESULT (the recording ends at the "
+              "record-time HOLD end); " + ("counted as not passed" if s["cls"] == "real" and s["half"] != "special"
+                                           else "left out of n") for s in live if s["res"] is None and s["relabel"]]
+    warns += [f"{_name(s)}: meta medium {s['meta']['medium']} is in no attack_replay/<medium> row" for s in sel
+              if s["cls"] == "attack_replay" and s["half"] != "special"
+              and not any(s["meta"]["medium"] in m for m in MEDIUM_ROWS.values())]
+    text = render(a.split, sha8, sel, st, special, mismatches, gest if a.gestures else None, crit, warns,
+                  r_by_target([s for s in sel if s["half"] != "special"]), drift)
     out.mkdir(parents=True, exist_ok=True)
-    _fresh(out / f"eval_{a.split}_{sha8}.md").write_text(text, encoding="utf-8")
+    report = _fresh(out / f"eval_{a.split}_{sha8}.md")
+    report.write_text(text, encoding="utf-8")
+    if counted:
+        runs.append({"sha8": sha8, "split": a.split, "created": time.strftime("%Y-%m-%dT%H:%M:%S"), "n": n_test})
+        ledger.write_text(json.dumps(runs, indent=1) + "\n", encoding="utf-8")
     print(text, end="")
+    print(f"report -> {report}", file=sys.stderr)
     if any(not c["ok"] for c in crit):
         calib = stats([s for s in samples if s["half"] == "calib"])
         test_samples = [s for s in live if s["half"] == "test"]

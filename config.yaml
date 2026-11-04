@@ -35,7 +35,7 @@ roi:
 session:
   countdown_s: 1.0             # [brief 3.1]
   first_match_frames: 3        # [brief 5.1] first match = raw label == target on this many consecutive detected frames
-  first_match_max_s: 4.0       # [brief 3.1] first match must start within t0 + this, else FAIL(TIMEOUT)
+  first_match_max_s: 4.0       # [brief 3.1] first match must start within t0 + this, else FAIL(TIMEOUT / WRONG_GESTURE, PLAN D14)
   challenge_timeout_s: 5.0     # [brief 3.1] stable hold must complete within t0 + this, else FAIL(TIMEOUT / WRONG_GESTURE)
   stable_hold_s: 0.5           # [brief 3.1] smooth label == target for this long -> HOLD
   stable_gap_tol_s: 0.1        # [brief 3.1] accumulated non-target / undetected time tolerated inside the stable hold
@@ -48,7 +48,7 @@ session:
   wrong_gesture_frac: 0.5      # [brief 3.1]
   roi_interval_s: 0.1          # [brief 5.0] one ROI block per >= this within [t0, HOLD end]
   roi_max_blocks: 70           # [brief 5.0] oldest dropped beyond this
-  challenge_len: 1             # [brief 3.4] 2 arrives in M4; M2 accepts only 1
+  challenge_len: 1             # [brief 3.4] only 1 is supported; 2 (M4 optional) not implemented, see DESIGN.md 8
 
 quality:
   min_palm_frac: 0.08          # [brief 5.5] pixel palm width / frame width
@@ -67,3 +67,38 @@ fusion:
   planarity_floor: 0.4         # [brief 5.6][calib] M4: max value with FRR = 0 on calib, <= initial + 0.2
   texture_floor: 0.3           # [brief 5.6][calib]
   pass_total: 0.6              # [brief 5.6]
+
+temporal:
+  prerecorded_s: 0.3           # [brief 5.1] t_r = t_match - t0 below this -> FAIL(PRERECORDED)
+  match_frames: 3              # [brief 5.1] t_match = first of this many consecutive detected frames == target; must equal session.first_match_frames
+  window_s: 1.0                # [brief 5.1] W = [max(t0, t_match - this, last t_switch), t_match]
+  max_gap_s: 0.15              # [brief 5.1] gap between adjacent detected frames in W above this -> INSUFFICIENT(HAND_LOST)
+  f_delta: 0.5                 # [brief 5.1] finger i is in F iff |e_i(W first) - e_i(t_match)| >= this
+  mid_band: [0.2, 0.8]         # [brief 5.1] (a) some i in F has e_i inside this band within W
+  max_ext_rate: 41.0           # [dev-8][calib] (brief 5.1 default 15) (b) max_i |de_i| / dt within W, 1/s. e in [0,1] => rate <= 1/dt, so (b)
+                               # cannot fire below ~41 fps (off at 30 fps). 15 failed 16/23 real smoke transitions (per-transition max p99 31.4,
+                               # p100 31.7 /s); brief rule max(p99 x 1.3, p100) on the smoke p99 gives 40.9, rounded to 41. M4 re-derives on calib (lands near 1.3 x fps; PLAN dev-8)
+  switch_jump: 1.0             # [brief 5.0] track switch = palm centre jump > this x pixel palm width
+
+nonrigid:
+  c: 0.010                     # [synth][calib] score = sigmoid((r - c) / s); synthetic rigid r p95 < c < wiggling r median
+  s: 0.0015                    # [synth][calib]
+  min_frames: 5                # [dev-7] fewer qualified HOLD frames -> score None -> INSUFFICIENT(LOW_QUALITY)
+
+planarity:
+  min_pair_dt_s: 0.3           # [brief 5.3] t_b - t_a of a qualified pair
+  min_normal_deg: 12           # [brief 5.3][dev-6] pair angle >= this, measured as palm swing (Kabsch on world P0,P1,P5,P9,P13,P17)
+  max_pairs: 10                # [brief 5.3] largest angles first, each frame used at most once [dev-6]
+  min_pairs: 3                 # [brief 5.3] fewer qualified pairs -> INSUFFICIENT(NEED_ROTATION)
+  tau_hard: 0.02               # [brief 5.3][calib] R below this -> FAIL(PLANAR); M4: calib real-hand R p5 >= 2 x tau_hard
+  c: 0.04                      # [brief 5.3][calib] score = sigmoid((R - c) / s)
+  s: 0.01                      # [brief 5.3][calib]
+  ransac_thresh: 0.02          # [brief 5.3] inlier threshold x frame-a pixel palm width; rho is logged, never scored
+  ransac_iters: 200            # [brief 5.3]
+  ransac_seed: 0               # [impl] fixed seed so rho is reproducible offline
+
+texture:
+  band: [0.15, 0.45]           # [brief 5.4] annulus, cycles / px
+  c: 100.0                     # [synth][calib] score = 1 - sigmoid((M - c) / s); synthetic skin M << c, 4 px grating M >> c
+  s: 25.0                      # [synth][calib]
+  min_blocks: 5                # [brief 5.4] fewer qualified ROI blocks -> INSUFFICIENT(LOW_QUALITY)

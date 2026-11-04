@@ -6,6 +6,7 @@ SCHEMA grows with each milestone; a key missing from config.yaml or unknown to S
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 
 import yaml
@@ -44,7 +45,24 @@ SCHEMA = {
         "w_planarity": NUM, "w_texture": NUM, "w_nonrigid": NUM, "planarity_floor": NUM, "texture_floor": NUM,
         "pass_total": NUM,
     },
+    "temporal": {
+        "prerecorded_s": NUM, "match_frames": int, "window_s": NUM, "max_gap_s": NUM, "f_delta": NUM,
+        "mid_band": PAIR, "max_ext_rate": NUM, "switch_jump": NUM,
+    },
+    "nonrigid": {"c": NUM, "s": NUM, "min_frames": int},
+    "planarity": {
+        "min_pair_dt_s": NUM, "min_normal_deg": NUM, "max_pairs": int, "min_pairs": int, "tau_hard": NUM,
+        "c": NUM, "s": NUM, "ransac_thresh": NUM, "ransac_iters": int, "ransac_seed": int,
+    },
+    "texture": {"band": PAIR, "c": NUM, "s": NUM, "min_blocks": int},
 }
+
+
+def _finite(v) -> bool:
+    try:
+        return math.isfinite(v)
+    except OverflowError:  # a YAML int beyond float range: as unusable as .inf
+        return False
 
 
 def _check(node, schema: dict, path: str) -> None:
@@ -62,11 +80,14 @@ def _check(node, schema: dict, path: str) -> None:
             _check(val, typ, p)
         elif typ == PAIR:
             ok = (isinstance(val, list) and len(val) == 2
-                  and all(isinstance(v, NUM) and not isinstance(v, bool) for v in val) and val[0] < val[1])
+                  and all(isinstance(v, NUM) and not isinstance(v, bool) and _finite(v) for v in val)
+                  and val[0] < val[1])
             if not ok:
-                raise ConfigError(f"{p}: expected [lo, hi] numbers with lo < hi, got {val!r}")
+                raise ConfigError(f"{p}: expected [lo, hi] finite numbers with lo < hi, got {val!r}")
         elif isinstance(val, bool) or not isinstance(val, typ):
             raise ConfigError(f"{p}: expected {typ}, got {type(val).__name__} {val!r}")
+        elif typ is NUM and not _finite(val):  # YAML .nan / .inf / huge ints pass every range check
+            raise ConfigError(f"{p}: expected a finite number, got {val!r}")
 
 
 def validate(cfg: dict) -> dict:
@@ -76,10 +97,22 @@ def validate(cfg: dict) -> dict:
     if cfg["tracker"]["num_hands"] < 1:
         raise ConfigError("tracker.num_hands: must be >= 1")
     if cfg["session"]["challenge_len"] != 1:
-        raise ConfigError("session.challenge_len: only 1 is implemented until M4")
+        raise ConfigError("session.challenge_len: only 1 is implemented (2 is the optional M4 sequence mode, DESIGN.md 8)")
     f = cfg["fusion"]
-    if abs(f["w_planarity"] + f["w_texture"] + f["w_nonrigid"] - 1.0) > 1e-6:
+    w = sum(float(f[k]) for k in ("w_planarity", "w_texture", "w_nonrigid"))  # float(): an int sum can leave float range
+    if abs(w - 1.0) > 1e-6:
         raise ConfigError("fusion: weights w_planarity + w_texture + w_nonrigid must sum to 1")
+    if cfg["temporal"]["match_frames"] != cfg["session"]["first_match_frames"]:
+        raise ConfigError("temporal.match_frames: must equal session.first_match_frames (one t_match definition)")
+    pl = cfg["planarity"]
+    if not 1 <= pl["min_pairs"] <= pl["max_pairs"]:
+        raise ConfigError("planarity: need 1 <= min_pairs <= max_pairs")
+    for sec in ("nonrigid", "planarity", "texture"):
+        if cfg[sec]["s"] <= 0:
+            raise ConfigError(f"{sec}.s: sigmoid scale must be > 0")
+    for sec, key in (("texture", "min_blocks"), ("planarity", "ransac_iters")):
+        if cfg[sec][key] < 1:  # 0 blocks -> NaN texture total; 0 iterations -> planarity crashes
+            raise ConfigError(f"{sec}.{key}: must be >= 1")
     for sec, keys in SCHEMA.items():
         for key in keys:
             if key.endswith("_s") and cfg[sec][key] <= 0:
@@ -90,7 +123,7 @@ def validate(cfg: dict) -> dict:
 def load_config(path="config.yaml") -> dict:
     try:
         cfg = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as e:
+    except (OSError, ValueError, yaml.YAMLError) as e:  # ValueError: not UTF-8, or an int over 4300 digits
         raise ConfigError(f"cannot read {path}: {e}") from e
     return validate(cfg)
 

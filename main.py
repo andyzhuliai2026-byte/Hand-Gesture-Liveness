@@ -1,4 +1,4 @@
-"""HandLiveness M2: challenge-response session on camera / video replay, per-round recorder, headless bench."""
+"""HandLiveness: challenge-response hand liveness demo (camera / video replay, per-round recorder, headless bench)."""
 from __future__ import annotations
 
 import argparse
@@ -35,7 +35,7 @@ RECORD_CLASSES = ("smoke", "real", "attack_photo", "attack_switch", "attack_repl
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="HandLiveness M2")
+    p = argparse.ArgumentParser(description="HandLiveness: challenge-response hand liveness demo")
     p.add_argument("--camera", type=int, default=0)
     p.add_argument("--video", metavar="PATH")
     p.add_argument("--record", metavar="DIR")
@@ -136,7 +136,7 @@ class Recorder:
             self._vw = None
 
     def close(self) -> None:
-        self._release()
+        self.discard_round()  # q / window close / Ctrl-C / error / --max-frames mid-round: drop it like r (PLAN D11)
 
 
 def round_summary(ev) -> dict:
@@ -272,7 +272,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{fr.t:.3f} {int(fr.present)} {fr.raw_label} {out.smooth_label} {out.phase} "
                           f"{out.target or '-'}", flush=True)
                 if windowed or args.save_frames:
-                    canvas = ui.draw(img, fr, pose, out, {"fps": fps, "proc_ms": statistics.median(procs)},
+                    canvas = ui.draw(img, fr, pose, out, {"fps": fps, "proc_ms": statistics.median(procs),
+                                                          "recording": rec is not None},
                                      debug, cfg)
                     if args.save_frames:
                         cv2.imwrite(str(Path(args.save_frames) / f"{n - 1:06d}.png"), canvas)

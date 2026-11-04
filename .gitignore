@@ -3,6 +3,8 @@ data/
 models/
 reports/
 logs/
+# real-hand keypoint fixture (PROMPT 7.1): never pushed, see PLAN dev-10
+tests/fixtures/
 .venv/
 __pycache__/
 *.pyc

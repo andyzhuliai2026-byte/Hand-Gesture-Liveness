@@ -1,6 +1,6 @@
 # HandLiveness — 手势挑战-应答式活体检测 demo（macOS）
 
-当前进度：**M3 代码完成**（挑战状态机、质量门控、按回合录制、评测框架，活体分项 5.1 时序、5.2 非刚性、5.3 平面性、5.4 纹理全部实现），M4 中不依赖样本的部分（tools/calibrate.py、评测报告补充、DESIGN.md 中不依赖实测的章节）也已完成，可选的 `challenge_len: 2` 序列模式没有做。M3 验收的 calib 评测要等 §7.3 样本。待你决定：OPEN_PALM 的 strict xfail、dev-6～dev-9（PLAN.md ⑤）、重标后回放没有结果的样本怎么计（PLAN.md ⑧ S7）、测试缺模型时是否联网下载（PLAN.md ⑧ S8 (8)）。阈值仍是任务书默认值或由合成数据/smoke 录像推出的初值，标定在 M4 做。规格见 [PROMPT.md](PROMPT.md)，实施计划与偏差记录见 [PLAN.md](PLAN.md)。
+当前进度：**M3 代码完成**（挑战状态机、质量门控、按回合录制、评测框架，活体分项 5.1 时序、5.2 非刚性、5.3 平面性、5.4 纹理全部实现），M4 中不依赖样本的部分（tools/calibrate.py、评测报告补充、DESIGN.md 中不依赖实测的章节）也已完成，可选的 `challenge_len: 2` 序列模式没有做。M3 验收的 calib 评测要等 §7.3 样本。待你决定：OPEN_PALM 的 strict xfail、dev-6～dev-11（PLAN.md ⑤）、重标后回放没有结果的样本怎么计（PLAN.md ⑧ S7）、测试缺模型时是否联网下载（PLAN.md ⑧ S8 (8)）。阈值仍是任务书默认值或由合成数据/smoke 录像推出的初值，标定在 M4 做。规格见 [PROMPT.md](PROMPT.md)，实施计划与偏差记录见 [PLAN.md](PLAN.md)。
 
 ## 安装
 
@@ -65,7 +65,7 @@ uv pip install --python .venv/bin/python -r requirements.lock
 
 ## 录制样本
 
-规程见 PROMPT.md §7.3。每回合从倒计时到结果页自动落盘到 `data/<类别>/<YYYYmmdd-HHMMSS>/`（frames.npz、meta.json、video.mp4）；中途按 `r` 丢弃、或按 `q` / 关窗 / Ctrl-C 退出的回合不落盘（出错退出、`--max-frames` 用完时也一样），未完成的回合目录直接删除。
+规程见 PROMPT.md §7.3，逐步操作清单见 [docs/calibration.md](docs/calibration.md)。每回合从倒计时到结果页自动落盘到 `data/<类别>/<YYYYmmdd-HHMMSS>/`（frames.npz、meta.json、video.mp4）；中途按 `r` 丢弃、或按 `q` / 关窗 / Ctrl-C 退出的回合不落盘（出错退出、`--max-frames` 用完时也一样），未完成的回合目录直接删除。
 
 录制前先关闭 macOS 视频效果（摄像头使用中打开 控制中心 → 视频效果，为终端 App 关闭"手势反应"、"人物居中"、"影棚灯光"、"人像"、"背景"）。
 
@@ -76,14 +76,15 @@ uv pip install --python .venv/bin/python -r requirements.lock
 | `real` | ≥ 20 | 左右手各半，normal/dim/backlit 都要有，随机挑战；COUNTDOWN 时张开的手已在画面里，HOLD 按提示自然转腕；条件允许时至少 1/3 来自第二个人；另录 ≥ 4 条 HOLD 几乎不动的（`variant=still`），不计入 FRR |
 | `attack_photo` | ≥ 8 | print 4、phone 4；`--target` 固定；挑战出现后 1–3 s 移入介质，HOLD 时倾斜 ±20° |
 | `attack_switch` | ≥ 12 | 手机相册 8、平板 4；`--target` 固定且不是 OPEN_PALM；相册里张开手照片的下一张就是目标照片；COUNTDOWN 时展示张开手照片，挑战出现后滑到目标照片，HOLD 时倾斜介质 ±20° |
-| `attack_replay` | ≥ 16 | phone 8、tablet/monitor 8，still/moving 各半；`--target` 固定。先用手机录 6 段真手视频：张开手 1 s → 目标手势 → 保持 3 s 并转腕。视频开头的张开手在 COUNTDOWN 时已在画面里，挑战出现后 0.5–2.0 s 内现场开始播放对应片段，屏幕亮度最高。另录 ≥ 4 条 phone 的 `variant=preplay`（预判目标，COUNTDOWN 期间就已开始播放）、≥ 4 条 `variant=handheld`（持介质的手故意入画） |
-| `gestures` | 12 | 6 手势 × 左右手，`--target ID`，挑战出现后 1 s 内做出并保持 ≥ 3 s；同一手势的左右手**相邻**录（先左后右或先右后左都行） |
+| `attack_replay` | ≥ 16 | phone 8、tablet/monitor 8，still/moving 各半；`--target` 固定。先用手机录 6 段真手视频：张开手 1 s → 目标手势 → 保持 3 s 并转腕（OPEN_PALM 那段从握拳开始，PLAN.md dev-11）。视频首帧的手在 COUNTDOWN 时已在画面里，挑战出现后 0.5–2.0 s 内现场开始播放对应片段，屏幕亮度最高。另录 ≥ 4 条 phone 的 `variant=preplay`（预判目标：按空格前约 1 s 就开始播放，揭示时视频里已是目标手势）、≥ 4 条 `variant=handheld`（持介质的手故意入画） |
+| `gestures` | 12 | 6 手势 × 左右手，`--target ID`，挑战出现后 1 s 内做出并保持 ≥ 3 s；同一手势的左右手**相邻**录，逐个手势轮换先后（第 1、3、5 个先左后右，第 2、4、6 个先右后左） |
 
 `--record` 的目录名必须是 `real`、`attack_photo`、`attack_switch`、`attack_replay`、`gestures`、`smoke` 之一，拼错直接报错退出。
 
 切分规则（evaluate 自动做，不手工指定）：每个类别按目录名（即录制时间）排序，奇数位 → calib、偶数位 → test。所以：
 
-- `gestures` 同一手势的左右手相邻录，两条正好一条进 calib、一条进 test；
+- `gestures` 同一手势的左右手相邻录，两条正好一条进 calib、一条进 test；逐个手势轮换先后，否则 calib 半区只有一只手；
+- `real` 按同一只手两条一组录（左、左、右、右），不要左、右交替：奇数位全是左手，calib 半区会只剩左手；
 - 某条按 `x` 作废后**立即重录同一条**（同一手势、同一只手、同一介质），不要跳到下一条再回头补，否则后面所有样本的奇偶位都会错开、配对被打乱。
 
 只有这几种 (类别, variant) 单列、不参与切分和通过率：`real` 的 `still`、`attack_replay` 的 `preplay`、`attack_*` 的 `handheld`。`attack_replay` 的 `still` 和 `moving` 都正常参与切分与通过率，`real` 的 `moving` 也一样。
@@ -118,7 +119,7 @@ uv pip install --python .venv/bin/python -r requirements.lock
 .venv/bin/python -m tools.calibrate
 ```
 
-报告给出 `temporal.max_ext_rate` 与两个融合下限的建议值、`planarity.tau_hard` 约束是否满足、按手势分列的 R、各检查项的分布与 AUC，以及手势阈值在真手上的余量。冻结由人来做：把采用的值和报告依据写进 config.yaml 注释并提交，然后才跑 `--split test`。`--export-fixture` 另把 gestures calib 半区的关键点（不含视频与掌心块）导出到 `tests/fixtures/gestures_real.npz`，供 `tests/test_gestures_real.py` 做真手回归；这个文件只在本机提交，不推远端（PROMPT.md §7.1）。
+报告给出 `temporal.max_ext_rate` 与两个融合下限的建议值、`planarity.tau_hard` 约束是否满足、按手势分列的 R、各检查项的分布与 AUC，以及手势阈值在真手上的余量。冻结由人来做：把采用的值和报告依据写进 config.yaml 注释并提交，然后才跑 `--split test`。`--export-fixture` 另把 gestures calib 半区的关键点（不含视频与掌心块）导出到 `tests/fixtures/gestures_real.npz`，供 `tests/test_gestures_real.py` 做真手回归；这个文件是生物特征关键点，不得推到远端：仓库现在有公开远端，`tests/fixtures/` 已加进 .gitignore，导出后留在本机工作区、不提交（被忽略的未跟踪文件换分支不会丢，测试在任何分支都会跑；丢了重跑 `--export-fixture`）。不要 `git add -f` 到本地分支：切回 main 时文件会被删掉，而且一次 `git push --all` 就会上公开远端（PLAN.md dev-10，待你确认）。
 
 ## macOS 注意事项
 

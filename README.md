@@ -1,6 +1,6 @@
 # HandLiveness — 手势挑战-应答式活体检测 demo（macOS）
 
-当前进度：**M3 代码完成**（挑战状态机、质量门控、按回合录制、评测框架，活体分项 5.1 时序、5.2 非刚性、5.3 平面性、5.4 纹理全部实现），M4 中不依赖样本的部分（tools/calibrate.py、评测报告补充、DESIGN.md 中不依赖实测的章节）也已完成，可选的 `challenge_len: 2` 序列模式没有做。M3 验收的 calib 评测要等 §7.3 样本。待你决定：OPEN_PALM 的 strict xfail、dev-6～dev-11（PLAN.md ⑤）、重标后回放没有结果的样本怎么计（PLAN.md ⑧ S7）、测试缺模型时是否联网下载（PLAN.md ⑧ S8 (8)）。阈值仍是任务书默认值或由合成数据/smoke 录像推出的初值，标定在 M4 做。规格见 [PROMPT.md](PROMPT.md)，实施计划与偏差记录见 [PLAN.md](PLAN.md)。
+当前进度：**M3 代码完成**（挑战状态机、质量门控、按回合录制、评测框架，活体分项 5.1 时序、5.2 非刚性、5.3 平面性、5.4 纹理全部实现），M4 中不依赖样本的部分（tools/calibrate.py、评测报告补充、DESIGN.md 中不依赖实测的章节）也已完成，可选的 `challenge_len: 2` 序列模式没有做。M3 验收的 calib 评测要等 §7.3 样本。待你决定：OPEN_PALM 的 strict xfail、dev-6～dev-9（PLAN.md ⑤；dev-10、dev-11 已确认）、重标后回放没有结果的样本怎么计（PLAN.md ⑧ S7）、测试缺模型时是否联网下载（PLAN.md ⑧ S8 (8)）。阈值仍是任务书默认值或由合成数据/smoke 录像推出的初值，标定在 M4 做。规格见 [PROMPT.md](PROMPT.md)，实施计划与偏差记录见 [PLAN.md](PLAN.md)。
 
 ## 安装
 
@@ -119,7 +119,7 @@ uv pip install --python .venv/bin/python -r requirements.lock
 .venv/bin/python -m tools.calibrate
 ```
 
-报告给出 `temporal.max_ext_rate` 与两个融合下限的建议值、`planarity.tau_hard` 约束是否满足、按手势分列的 R、各检查项的分布与 AUC，以及手势阈值在真手上的余量。冻结由人来做：把采用的值和报告依据写进 config.yaml 注释并提交，然后才跑 `--split test`。`--export-fixture` 另把 gestures calib 半区的关键点（不含视频与掌心块）导出到 `tests/fixtures/gestures_real.npz`，供 `tests/test_gestures_real.py` 做真手回归；这个文件是生物特征关键点，不得推到远端：仓库现在有公开远端，`tests/fixtures/` 已加进 .gitignore，导出后留在本机工作区、不提交（被忽略的未跟踪文件换分支不会丢，测试在任何分支都会跑；丢了重跑 `--export-fixture`）。不要 `git add -f` 到本地分支：切回 main 时文件会被删掉，而且一次 `git push --all` 就会上公开远端（PLAN.md dev-10，待你确认）。
+报告给出 `temporal.max_ext_rate` 与两个融合下限的建议值、`planarity.tau_hard` 约束是否满足、按手势分列的 R、各检查项的分布与 AUC，以及手势阈值在真手上的余量。冻结由人来做：把采用的值和报告依据写进 config.yaml 注释并提交，然后才跑 `--split test`。`--export-fixture` 另把 gestures calib 半区的关键点（不含视频与掌心块）导出到 `tests/fixtures/gestures_real.npz`，供 `tests/test_gestures_real.py` 做真手回归；这个文件是生物特征关键点，不得推到远端：仓库现在有公开远端，`tests/fixtures/` 已加进 .gitignore，导出后留在本机工作区、不提交（被忽略的未跟踪文件换分支不会丢，测试在任何分支都会跑；丢了重跑 `--export-fixture`）。不要 `git add -f` 到本地分支：切回 main 时文件会被删掉，而且一次 `git push --all` 就会上公开远端（PLAN.md dev-10，已确认）。
 
 ## macOS 注意事项
 

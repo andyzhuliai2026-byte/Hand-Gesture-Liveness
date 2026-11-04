@@ -76,8 +76,8 @@ IDLE → COUNTDOWN(1.0 s) → CHALLENGE(≤ 5.0 s) → HOLD(1.5 s) → VERIFYING
 - **dev-7** `nonrigid.min_frames` = 5；5.2 分数为 None 时判 INSUFFICIENT(LOW_QUALITY)；待用户确认。
 - **dev-8** `temporal.max_ext_rate` 15 → 41（smoke 23 次真手过渡，按 §5.1 规则）。e ∈ [0,1] 使 41 在约 41 fps 以下不可能触发，30 fps 下 (b) 关闭；M4 按同一规则重标会落在约 1.3 × fps。选项（保持 41 且 (b) 关闭；(b) 按时间窗计速率 = 改规格；采集固定 30 fps；min(e2d, e3d) 还是只用 e3d）待用户决定（PLAN ⑤ dev-8）。
 - **dev-9** t_match 只认在 t0 或之后结束的目标连续段：倒计时里短暂摆出目标又放下不判 PRERECORDED，跨过 t0 的连续段仍从起点算；待用户确认保持还是回到 §5.1 字面规则（PLAN ⑤ dev-9）。
-- **dev-10** 真手关键点夹具 `tests/fixtures/` 加入 .gitignore，导出后只留本机工作区、不提交（仓库已有公开远端）；待用户确认。
-- **dev-11** attack_replay 的 OPEN_PALM 回放片段从握拳开始，否则该目标只会判 NO_TRANSITION / PRERECORDED；待用户确认。
+- **dev-10** 真手关键点夹具 `tests/fixtures/` 加入 .gitignore，导出后只留本机工作区、不提交（仓库已有公开远端）；用户已确认。
+- **dev-11** attack_replay 的 OPEN_PALM 回放片段从握拳开始，否则该目标只会判 NO_TRANSITION / PRERECORDED；用户已确认。
 
 ## 7. 已知风险与局限
 

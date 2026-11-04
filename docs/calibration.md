@@ -96,7 +96,7 @@
 
 ## 6. attack_replay（屏幕回放，B）≥ 16 条，另加 ≥ 4 preplay、≥ 4 handheld
 
-先用手机录 6 段真手视频，每段一个手势：张开手 1 s → 做目标手势 → 保持 3 s 并转腕。**OPEN_PALM 那段改成握拳 1 s → 张开手 → 保持 3 s 并转腕**：视频开头就是目标的话，揭示时已是目标，只会判 NO_TRANSITION / PRERECORDED，测不到回放防线（attack_switch 排除 OPEN_PALM 也是这个原因；PLAN.md dev-11，待确认）。播放设备屏幕亮度调到最高。
+先用手机录 6 段真手视频，每段一个手势：张开手 1 s → 做目标手势 → 保持 3 s 并转腕。**OPEN_PALM 那段改成握拳 1 s → 张开手 → 保持 3 s 并转腕**：视频开头就是目标的话，揭示时已是目标，只会判 NO_TRANSITION / PRERECORDED，测不到回放防线（attack_switch 排除 OPEN_PALM 也是这个原因；PLAN.md dev-11，已确认）。播放设备屏幕亮度调到最高。
 
 正式样本 16 条：phone 8，tablet 或 monitor 8；每种里 still（架住）/ moving（手持晃动，持机的手不入画）各半。每条 `--target` = 视频里的手势；倒计时时视频首帧的手（张开手；OPEN_PALM 段是握拳）已在画面里（停在首帧）；揭示后 0.5–2.0 s 内**现场**按播放或寻址到对应片段。
 
@@ -127,7 +127,7 @@
 
 写 `reports/calib_<sha8>.md`（同样不覆盖旧报告，依次 `-2`、`-3`…），不改 config.yaml：`temporal.max_ext_rate`（真手 p99 × 1.3 且 ≥ 最大值）、`fusion.planarity_floor` / `texture_floor`（calib 真手 FRR = 0 的最大值，且 ≤ 初值 + 0.2）的建议值；`planarity.tau_hard` 约束（真手 R 的 p5 ≥ 2 × tau_hard）是否满足；按手势分列的 R 与真手/照片是否重叠；nonrigid / texture / planarity 的 c、s 所需的分布与 AUC（任务书没有公式，由人按分布定并把理由写进 config.yaml 注释）；手势阈值在真手上的余量。
 
-`--export-fixture` 另把 gestures calib 半区的关键点（不含视频与掌心块）导出到 `tests/fixtures/gestures_real.npz`，供 `tests/test_gestures_real.py` 做真手回归。**这个文件是生物特征数据**：PROMPT §0.2 / §7.1 允许它入库的前提是"仓库仅存本机、不推远端"，现在 origin 是 GitHub 公开仓库，`tests/fixtures/` 已加进 .gitignore。导出后留在本机工作区、不提交：被忽略的未跟踪文件换分支不会丢，`tests/test_gestures_real.py` 在任何分支上都会跑；丢了就重跑 `--export-fixture`。不要用 `git add -f` 提交到本地分支：切回 main 时 git 会把它从工作区删掉，main 上的真手回归随之 skip，而且那条分支一次 `git push --all` 或误合并就会上公开远端（PLAN.md dev-10，待确认）。
+`--export-fixture` 另把 gestures calib 半区的关键点（不含视频与掌心块）导出到 `tests/fixtures/gestures_real.npz`，供 `tests/test_gestures_real.py` 做真手回归。**这个文件是生物特征数据**：PROMPT §0.2 / §7.1 允许它入库的前提是"仓库仅存本机、不推远端"，现在 origin 是 GitHub 公开仓库，`tests/fixtures/` 已加进 .gitignore。导出后留在本机工作区、不提交：被忽略的未跟踪文件换分支不会丢，`tests/test_gestures_real.py` 在任何分支上都会跑；丢了就重跑 `--export-fixture`。不要用 `git add -f` 提交到本地分支：切回 main 时 git 会把它从工作区删掉，main 上的真手回归随之 skip，而且那条分支一次 `git push --all` 或误合并就会上公开远端（PLAN.md dev-10，已确认）。
 
 ## 8. 冻结阈值与 test 半区
 
